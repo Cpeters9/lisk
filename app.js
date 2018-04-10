@@ -617,9 +617,9 @@ d.run(() => {
 			db(cb) {
 				var db = require('./db');
 				db
-					.connect(config.db, dbLogger)
+					.connect(config.db, dbLogger, logger)
 					.then(db => cb(null, db))
-					.catch(err => cb(err));
+					.catch(cb);
 			},
 
 			/**
@@ -894,46 +894,47 @@ d.run(() => {
 			],
 		},
 		(err, scope) => {
+			// Receives a 'cleanup' signal and cleans all modules
+			process.once('cleanup', () => {
+				scope.logger.info('Cleaning up...');
+				scope.socketCluster.destroy();
+				async.eachSeries(
+					modules,
+					(module, cb) => {
+						if (typeof module.cleanup === 'function') {
+							module.cleanup(cb);
+						} else {
+							setImmediate(cb);
+						}
+					},
+					err => {
+						if (err) {
+							scope.logger.error(err);
+						} else {
+							scope.logger.info('Cleaned up successfully');
+						}
+						process.exit(1);
+					}
+				);
+			});
+
+			process.once('SIGTERM', () => {
+				process.emit('cleanup');
+			});
+
+			process.once('exit', () => {
+				process.emit('cleanup');
+			});
+
+			process.once('SIGINT', () => {
+				process.emit('cleanup');
+			});
+
 			if (err) {
 				logger.fatal(err);
+				process.emit('cleanup');
 			} else {
 				scope.logger.info('Modules ready and launched');
-
-				// Receives a 'cleanup' signal and cleans all modules
-				process.once('cleanup', () => {
-					scope.logger.info('Cleaning up...');
-					scope.socketCluster.destroy();
-					async.eachSeries(
-						modules,
-						(module, cb) => {
-							if (typeof module.cleanup === 'function') {
-								module.cleanup(cb);
-							} else {
-								setImmediate(cb);
-							}
-						},
-						err => {
-							if (err) {
-								scope.logger.error(err);
-							} else {
-								scope.logger.info('Cleaned up successfully');
-							}
-							process.exit(1);
-						}
-					);
-				});
-
-				process.once('SIGTERM', () => {
-					process.emit('cleanup');
-				});
-
-				process.once('exit', () => {
-					process.emit('cleanup');
-				});
-
-				process.once('SIGINT', () => {
-					process.emit('cleanup');
-				});
 			}
 		}
 	);
